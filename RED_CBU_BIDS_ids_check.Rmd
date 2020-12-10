@@ -1,0 +1,102 @@
+---
+title: "RED & MRI ID Check"
+author: "Stepheni Uh"
+date: "December 7, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Libraries
+```{r, include=FALSE}
+#load libraries
+libs <- c('ggplot2', 'tidyverse', 'stringr', 'psych', 
+          'stats', 'ggpubr', 'factoextra', 'kohonen', 'gridExtra',
+          'readxl', 'aod', 'rstatix', 'ez', 'ggpubr', 'reshape2', 'afex', 'emmeans')
+lapply(libs, require, character.only = T)
+```
+
+Aim of this script:
+- Check to make sure new sub-ids and old sub-ids are correctly matched with participants
+- Pull in IDs from newly created csv and old files
+
+This is especially needed when we create the events file for each subject for new first level and group analyses
+
+###########################################
+
+Read in CSVs with appropriate IDs
+```{r, include=FALSE}
+new_ids <- read.csv("X:/RED/RED_subcbu_ids.csv", stringsAsFactors = FALSE)
+
+# old data
+old_ids_data <- read_excel("C:/Users/su01/ownCloud/PhD/RED/Go-NoGo data/RED_MRI_nopid.xlsx", sheet = "final sample")
+
+# select old IDs only from data
+old_ids <- old_ids_data %>% select(sub_id_3digit, mri_id, red_id)
+
+# old data that has all the info
+old_ids_all <- read_excel("C:/Users/su01/ownCloud/PhD/RED/Go-NoGo data/RED_MRI_nopid.xlsx", sheet = "task")
+```
+
+Rearrange the old IDs because these are organized in non-bids form
+```{r}
+
+# first select ids that have a sub_id value
+old_ids_all <- old_ids_all %>% filter(!is.na(sub_id))
+
+# select the first three columns only first
+old_ids_selected <- old_ids_all %>% select(sub_id, mri_id, red_id)
+
+# split up the IDs by sub - this is a weird way to go about it but it works
+ids_old <- as.data.frame(str_split_fixed(old_ids_selected$sub_id, "sub", 2), stringsAsFactors = FALSE)
+# sub disappears so add that plus the -0 into the first column
+ids_old$V1 <- "sub-0"
+# concatenate V1 & V2 to get new sub_ids
+ids_old$sub_id <- paste0(ids_old$V1,ids_old$V2)
+
+# add this column into old dataset that we will use to merge
+old_ids_selected <- cbind(old_ids_selected, ids_old$sub_id)
+
+# rearrange columns and rename the ids_old$sub_id (drop the original sub_id column)
+old_ids_selected <- old_ids_selected %>% select(sub_id_old = `ids_old$sub_id`,
+                                                mri_id,
+                                                red_id)
+
+# make sub_id as character (turns into factor after binding)
+old_ids_selected$sub_id_old <- as.character(old_ids_selected$sub_id)
+
+# recode sub-028+F134 & sub-060 CBU_ID values
+old_ids_selected$sub_id_old[old_ids_selected$sub_id_old == "sub-028+F134"] <- "sub-028"
+old_ids_selected$mri_id[old_ids_selected$mri_id == "CBU190642??"] <- "CBU190642"
+
+# order sub-ids alphabetically
+old_ids_selected <- old_ids_selected[order(old_ids_selected$sub_id_old),]
+```
+
+Match the columns to make sure they are correct
+```{r, include = FALSE}
+# recognize that old ids we are missing 5 but you can check in this the "task" sheet of old excel file that was read in
+
+# put old sub_ids into a list to filter out the ones not included in the new dataset
+oldids <- old_ids_selected$sub_id
+
+# filter out ids not in the old list
+new_ids_selected <- new_ids[new_ids$sub_id %in% oldids,]
+# separate values since old ones don't have the MRI tag
+new_ids_selected <- new_ids_selected %>% separate(cbu_id, c("cbu_id", "mri_tag"))
+
+# merge to check the two columns of each one
+test <- merge(new_ids_selected, old_ids_selected, by=1:2)
+
+# create new dataset
+check <- cbind(new_ids_selected, old_ids_selected)
+check$match_subids <- check$sub_id == check$sub_id_old
+check$match_cbuids <- check$cbu_id == check$mri_id
+
+# create CSV file for check purposes in imaging RED folder
+write.csv(check, "X:/RED/RED_bids_cbu_ids.csv")
+
+```
+
