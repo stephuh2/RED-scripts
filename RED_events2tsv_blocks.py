@@ -9,10 +9,10 @@ from decimal import *
 from enum import Enum
 
 # First identify directories
-# files_dir ='/imaging/su01/RED/GNG Task Data'
-# output_dir = '/imaging/su01/RED/bids'
-files_dir = os.getcwd()
-output_dir = os.getcwd()
+files_dir ='/imaging/su01/RED/GNG Task Data' #where all the events.txt files are stored
+output_dir = '/imaging/su01/RED/bids'
+# files_dir = os.getcwd()
+# output_dir = os.getcwd()
 
 # Identify subject list (red_files correspond to bids_ids order)
 red_events = ["99013_events.txt"]
@@ -111,6 +111,6 @@ if __name__ == '__main__':
         # save dataframe as tsv into respective output directory folder
         # set name of file
         
-        #tsvname = (output_dir + '/' + bids_ids[i] + '/' + 'func/' + bids_ids[i] + '_events.tsv')
-        with open(bids_ids[i] + '/' + 'func/' + bids_ids[i] + '_events.tsv', 'w') as tsvfile:
+        tsvname = (output_dir + '/' + bids_ids[i] + '/' + 'func/' + bids_ids[i] + '_events.tsv')
+        with open(tsvname, 'w') as tsvfile:
             tsvfile.write(df.to_csv(sep="\t", index=False))  # without row index
