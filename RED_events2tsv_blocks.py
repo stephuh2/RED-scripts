@@ -110,7 +110,7 @@ if __name__ == '__main__':
         print(df)
         # save dataframe as tsv into respective output directory folder
         # set name of file
-        
+
         #tsvname = (output_dir + '/' + bids_ids[i] + '/' + 'func/' + bids_ids[i] + '_events.tsv')
         with open(bids_ids[i] + '/' + 'func/' + bids_ids[i] + '_events.tsv', 'w') as tsvfile:
             tsvfile.write(df.to_csv(sep="\t", index=False))  # without row index
