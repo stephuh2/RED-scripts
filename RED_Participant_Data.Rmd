@@ -1,0 +1,853 @@
+---
+title: "RED Participant Data"
+author: "S. Uh"
+date: "3/15/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/ownCloud/PhD/RED")
+getwd()
+```
+
+Libraries
+```{r, include=FALSE}
+#load libraries
+libs <- c('ggplot2', 'tidyverse', 'stringr', 'psych', 'dplyr',
+          'stats', 'ggpubr', 'factoextra', 'kohonen', 'gridExtra', 'naniar',
+          'readxl', 'aod', 'rstatix', 'ez', 'ggpubr', 'reshape2', 'afex', 'emmeans')
+lapply(libs, require, character.only = T)
+```
+
+## Script aims
+- Update participant dataset with final participants (N = 40)
+- Compile datasets from others
+- Save as a CSV to use for ROI analysis later
+
+## STEPS
+1) Pull in final red_ids that we will need in the end
+2) But start with all participants in the RED small sample for imputation purposes
+3) Select variables of interest (mainly from Alex's spreadsheet)
+4) Drop people with non-complete cases of SDQ data
+5) Drop those missing more than 30% of data from the rest of the variables
+6) Run imputations (KNN) on normalized variables
+7) Filter out participants to have only final sample with brain data (may be less than 40 since some might be missing SDQ data)
+8) Make sure red_id, sub_id, and mri_id are all included in final CSV
+
+# Identify the final red_ids and store into a list for last step
+```{r, include=FALSE}
+# Read in file with list of sub-ids from final group
+fmri_ids <- read_excel("~/ownCloud/PhD/RED/MRI Quality Checks/RED_tasksample_ids.xls")
+
+# make into list
+ids <- fmri_ids$sub_id
+
+# Match sub IDS with RED IDs
+# Pull in ID data script
+all_ids <- read.csv("~/ownCloud/PHD/RED/RED_bids_cbu_ids.csv")
+# Merge the two
+final_fmri_ids <- merge(fmri_ids, all_ids, by = "sub_id")
+# Select only needed columns
+final_fmri_ids <- final_fmri_ids %>% select(sub_id, red_id, cbu_id, mri_tag)
+
+# place red_ids into a list
+red_ids <- final_fmri_ids$red_id
+```
+
+
+# pull in other data from the RED folder
+# rename all the ID variable names to the same one
+# Use Roma's red_id to make list as the full small sample id
+
+Pulling in all datasets here
+```{r, include=FALSE}
+library(plyr)
+library(dplyr)
+ipad <- read_excel("~/ownCloud/PhD/RED/Behavioral Data/red_data.xlsx", 
+                    sheet = "main_ipad")
+#rename ID
+ipad <- ipad %>% dplyr::rename(red_id = PpsID)
+
+sdq_wasi <- read_excel("~/ownCloud/PhD/RED/Behavioral Data/red_data.xlsx",
+                       sheet = "sdq_wasi")
+
+#sheet from roma that I reorganized
+data_roma <- read_excel("~/ownCloud/PhD/RED/Behavioral Data/red_data.xlsx",
+                           sheet = "data")
+#data shared from edwin
+data_edwin <- read.csv("~/ownCloud/PhD/RED/Other Datasets/ALL_data.csv")
+#rename ID
+data_edwin <- data_edwin %>% dplyr::rename(red_id = ppname)
+
+#data from alex
+data_alex <- read.csv("~/ownCloud/PhD/RED/Other Datasets/AI_data_Combined3.csv")
+#rename ID
+data_alex <- data_alex %>% dplyr::rename(red_id = Alex_ID)
+
+# #for age from screening variable
+# age <- read.csv("~/ownCloud/PhD/RED/RED_age.csv")
+# #drop first column
+# age <- age[,-1]
+# # for all the missing age (~119) replace as NA (naniar doesn't work for some reason so just do for loop)
+# for (i in 1:nrow(age)){
+#   if (age$red_age[i] > 100){
+#     age$red_age[i] <- NA
+#   }
+# }
+
+# pull in age from new csv made
+age <- read.csv("~/ownCloud/PhD/RED/RED_time1_age.csv")
+
+#Storing all red sample ids into a list from Roma's data
+all_red_ids <- data_roma$red_id
+
+```
+
+
+# Select only for all participants in small cohort RED sample
+**take note of the different ID names
+```{r, include=FALSE}
+ipad_data <- ipad[ipad$red_id %in% all_red_ids, ]
+#note that there are a ton of NAs for the first bit of the ipad data so take that out
+ipad_data <- subset(ipad_data, select=c(red_id,VOCAB_ItemStart:length(ipad_data)))
+
+sdq_wasi_filtered <- sdq_wasi[sdq_wasi$red_id %in% all_red_ids,]
+
+data_roma_filtered <- data_roma[data_roma$red_id %in% all_red_ids,]
+
+data_edwin_filtered <- data_edwin[data_edwin$red_id %in% all_red_ids,]
+
+data_alex_filtered <- data_alex[data_alex$red_id %in% all_red_ids,]
+
+#data_giacomo_data <- data_giacomo[data_giacomo$red_id  %in% all_red_ids,]
+#siblings <- data_giacomo[data_giacomo$PpsID_2_TEXT %in% all_red_ids,] #sibling within final sample - extract from ID_2 column
+```
+
+
+#from each dataset find the variables of interest and select them out
+Included all variables here but will only use Alex's and Roma's for now plus RCADS scores
+```{r}
+#from ipad group
+ipad_selected <- ipad_data %>% select(red_id, 
+                                          Q1_Chaos,
+                                          Q1_Con,
+                                          Q1_FAS,
+                                          Q2_Grit,
+                                          Q2_RCADS_MDD,
+                                          Q2_RCADS_GAD,
+                                          Q2_GrowthMindset,
+                                          Q3_Read,
+                                          Q3_ScreenTime,
+                                          Q3_SchoolLiking,
+                                          Q1_Chaos_Complete,
+                                          cancellation_marked_intertime_Norm,
+                                          digit_span_n_correct_Norm,
+                                          dot_matrix_n_correct_Norm,
+                                          GNG_Dprime,
+                                          GNG_omErr_Norm,
+                                          GNG_comErr_Norm,
+                                          reading_n_total_Norm,
+                                          vocab_p_correct_Norm,
+                                          sums_n_total_Norm,
+                                          LE_Zscore_FSN_Complete_Norm,
+                                          LC_Zscore_FSN_Complete_Norm)
+
+#from Edwin's dataset
+data_edwin_selected <- data_edwin_filtered %>% select(red_id,
+                                                      DEPRIVATION.Barriers_to_Housing_and_Services_Rank,
+                                                      DEPRIVATION.Crime_Rank,
+                                                      DEPRIVATION.Education_and_Skills_Rank,
+                                                      DEPRIVATION.Employment_Rank,
+                                                      DEPRIVATION.Employment_Score,
+                                                      DEPRIVATION.Health_and_Disability_Rank,
+                                                      DEPRIVATION.IDACI_Rank,
+                                                      DEPRIVATION.IDACI_Score,
+                                                      DEPRIVATION.IDAOPI_Rank,
+                                                      DEPRIVATION.IDAOPI_Score,
+                                                      DEPRIVATION.Income_Rank,
+                                                      DEPRIVATION.Income_Score,
+                                                      DEPRIVATION.Index_of_Multiple_Deprivation_Rank,
+                                                      DEPRIVATION.Living_Environment_Rank,
+                                                      GONOGO.Ad,
+                                                      GONOGO.CR_rate,
+                                                      GONOGO.FA_rate,
+                                                      GONOGO.RT_FA,
+                                                      GONOGO.RT_SD_FA,
+                                                      GONOGO.RT_SD_hit,
+                                                      GONOGO.RT_SD_scaled_FA,
+                                                      GONOGO.RT_SD_scaled_hit,
+                                                      GONOGO.RT_hit,
+                                                      GONOGO.beta,
+                                                      GONOGO.correct_rejections,
+                                                      GONOGO.criterion,
+                                                      GONOGO.dprime,
+                                                      GONOGO.duration,
+                                                      GONOGO.false_alarms,
+                                                      GONOGO.hit_rate,
+                                                      GONOGO.hits,
+                                                      GONOGO.miss_rate,
+                                                      GONOGO.misses,
+                                                      GONOGO.points)
+
+#from Roma's data
+data_roma_selected <- data_roma_filtered %>% select(red_id,
+                                                    mri_id,
+                                                    codePrepro,
+                                                    fsm_screencall,
+                                                    is_male,
+                                                    righthanded,
+                                                    age_years,
+                                                    age_months,
+                                                    equiv_income,
+                                                    parent_ed,
+                                                    sub_ses,
+                                                    adults_number,
+                                                    extracurricular_activities_yes,
+                                                    eats_breakfast_everyday,
+                                                    fruitveg_portions_everyday,
+                                                    days_off_school,
+                                                    child_health,
+                                                    unhealthy_food_portions,
+                                                    birth_weight_kg,
+                                                    hours_of_sleep,
+                                                    plays_outside_dayswk,
+                                                    maternal_age_atbirth,
+                                                    age_primarycaregiver,
+                                                    family_dinners_perwk,
+                                                    primary_caregiver_sex,
+                                                    shares_bedroom,
+                                                    has_mobile,
+                                                    has_tv_comp_bedroom,
+                                                    comp_tablet_number,
+                                                    user_internet_tv,
+                                                    caregiver_otherlanguages,
+                                                    child_otherlanguages,
+                                                    books_inhome,
+                                                    child_reads_alone_minutes,
+                                                    neighborhood_belonging,
+                                                    friends_in_neighborhood,
+                                                    wasi_mat,
+                                                    wasi_vocab,
+                                                    sdq_emo,
+                                                    sdq_pros,
+                                                    sdq_cond,
+                                                    sdq_peer,
+                                                    sdq_hypera,
+                                                    sdq_total)
+
+# from Alex's data
+data_alex_selected <- data_alex_filtered %>% select(red_id,
+                                                    #MRI_ID,
+                                                    #Age,
+                                                    Equivalised_Income,
+                                                    WASI_Mat,
+                                                    WASI_Voc,
+                                                    SDQ_emotional,
+                                                    SDQ_conduct,
+                                                    SDQ_peer,
+                                                    SDQ_hyperactivity,
+                                                    SDQ_prosocial,
+                                                    SDQ_total,
+                                                    SDQ_externalising,
+                                                    SDQ_internalising,
+                                                    objective_SES,
+                                                    subjective_SES,
+                                                    household_SES)
+
+# for some reason all of alex's data is character format
+# change to nuemric
+# this is horrible line of code because it looks so messy but just deal
+# also gets rid of the weird #N/A format which isn't read as an NA in r
+data_alex_selected[,2:ncol(data_alex_selected)][sapply(data_alex_selected[, 2:ncol(data_alex_selected)], is.character)] <- lapply(data_alex_selected[,2:ncol(data_alex_selected)][sapply(data_alex_selected[, 2:ncol(data_alex_selected)], is.character)], as.numeric)                                                
+```
+
+# Adding in missing SDQ scores from first participants
+This was computed based on script RED_SDQ.rmd
+Add to data_alex_selected
+```{r,include=FALSE}
+redpp_sdq_scores <- read.csv("~/ownCloud/PhD/RED/RED_firstpp_sdq.csv")
+# drop first column since that's just number of rows
+redpp_sdq_scores <- redpp_sdq_scores[,2:ncol(redpp_sdq_scores)]
+# change red_ids into characters for binding purposes
+redpp_sdq_scores$red_id <- as.character(redpp_sdq_scores$red_id)
+
+# merge with the sdq scores to add into these newly added rows
+data_alex_selected <- dplyr::bind_rows(data_alex_selected, redpp_sdq_scores)
+```
+
+
+# BASIC DEMOGRAPHICS
+Primarily for covariates to include in analyses (whether it be SnPM or correlations)
+Also for just overall datasets to have for reference
+```{r, include=FALSE}
+# Bring in sex from Roma's dataset
+sex <- data_roma_filtered %>% select(red_id, is_male)
+
+# One participant is missing after everything I did to check ipad data and screening
+# For now use age from Alex's dataset for 99119 & 99101
+age_add <- age %>% add_row(red_id = 99119)
+age_add <- age_add %>% add_row(red_id = 99101) #make sure this is age_add since we're adding onto it
+
+# Replace just the age for age_years
+age_add$age_years[age_add$red_id==99119] <- data_alex$Age[data_alex$red_id=='99119']
+age_add$age_years[age_add$red_id==99101] <- data_alex$Age[data_alex$red_id=='99101']
+# merge with age
+demo <- join(age_add, sex, by="red_id", type="full")
+
+### READ IN CBU SUB RED IDS FILE
+# this is for cbu and red id list with the age & sex we do have
+all_ids <- read.csv("~/ownCloud/PhD/RED/RED_bids_cbu_ids.csv")
+# select columns we need
+all_ids_selected <- all_ids %>% select(red_id, sub_id, cbu_id, mri_tag)
+
+# from demo, drop sex column since that is missing some data
+demo_selected <- demo %>% select(red_id, is_male, age_years, age_months)
+
+red_all_demo <- join(all_ids_selected, demo_selected, by="red_id", type="full")
+
+# reorder by red_id column
+all_demo <- red_all_demo[order(red_all_demo$red_id),]
+
+# write into csv
+#write.csv(all_demo, "~/ownCloud/PhD/RED/RED_ids_demo.csv", row.names = FALSE)
+
+# for final participant list merge with final_fmri_id
+final_demo <- merge(final_fmri_ids, demo)
+final_demo$age_years <- as.numeric(final_demo$age_years)
+summary(final_demo$age_years)
+mean(final_demo$age_years)
+sd(final_demo$age_years)
+# write into CSV for analysis (uncomment below if needed to resave)
+#write.csv(final_demo, "~/ownCloud/PhD/RED/RED_basicdemo.csv")
+```
+
+Put together dataset with the only variables we want for now
+- SDQ scores, WASI scores, SES factors (from Alex's)
+- RCAD scores (from ipad)
+
+```{r}
+# RCAD scores from ipad data
+all_red_ipad <- ipad_selected %>% select(red_id, Q2_RCADS_MDD, Q2_RCADS_GAD)
+# merge with demo
+all_red_ipad <- merge(demo, all_red_ipad)
+# drop sex and age_months
+all_red_ipad <- all_red_ipad %>% select(red_id,
+                                        is_male,
+                                        age_years,
+                                        Q2_RCADS_MDD,
+                                        Q2_RCADS_GAD)
+
+# Other scores from roma's raw data
+#final_roma <- data_roma_selected %>% select(red_id, age_years, age_months, is_male, sdq_emo, sdq_cond,
+#                                            sdq_peer, sdq_hypera, sdq_pros, sdq_total, wasi_mat, wasi_vocab)
+
+# merge final datasets together
+all_red_data <- merge(all_red_ipad, data_alex_selected)
+
+# if we want to keep the 146 participants and have NAs for missing data from alex's dataset:
+full_red_data <- join(all_red_ipad, data_alex_selected, by="red_id", type="full")
+```
+
+
+# SDQ AND RCADS CHECK FOR FINAL SAMPLE (fMRI sample n = 40)
+Just for SDQ and RCADS (no other variables)
+```{r}
+# get into final id format
+sdq_final <- data_alex_selected[data_alex_selected$red_id %in% red_ids,]
+# just select out for final sdq scores
+sdq_final <- sdq_final %>% select(red_id,
+                                  SDQ_total,
+                                  SDQ_internalising,
+                                  SDQ_externalising)
+
+# merge demo with all_red_ipad for rcads data
+sdqrcads <- merge(final_demo, all_red_ipad, by="red_id")
+# merge that with sdq final that we got above
+sdqrcads <- merge(sdqrcads, sdq_final)
+
+# just select the data we need
+sdqrcads <- sdqrcads %>% select(red_id, sub_id,
+                                'RCADS MDD' = Q2_RCADS_MDD,
+                                'RCADS GAD' = Q2_RCADS_GAD,
+                                'SDQ internalising' = SDQ_internalising,
+                                'SDQ externalising' = SDQ_externalising,
+                                'SDQ total' = SDQ_total)
+```
+
+
+########################
+# Participant exclusions
+First drop participants with noncomplete cases of SDQ
+Do a sanity check to see if any variables are missing more than 30% data
+Then drop participants missing more than 30% of the rest of the data
+
+# FOR WITHOUT WASI
+Let's try not dropping all SDQ since there are only a few people missing those scores
+So just comment out the missing sdq portion 
+
+```{r}
+# Replace #N/A with NA in dataset
+library(naniar)
+red_filtered <- all_red_data %>% replace_with_na_all(condition = ~.x == "#N/A")
+
+#############
+## don't run the sdq lines if we want to retain all 40 participants
+# Filter participants with missing SDQ data into another dataset
+missing_SDQ <- red_filtered %>% filter_at(vars(starts_with("SDQ")), any_vars(is.na(.)))
+
+# Store participant ids with missing SDQ data into a value
+no_sdq_ids <- missing_SDQ$red_id
+
+# Drop those participants from all red dataset
+red_filtered <- red_filtered[!red_filtered$red_id %in% no_sdq_ids,]
+#############
+
+# Note that there are some "NA" as character variables in dataset so replace those
+red_filtered <- red_filtered %>% replace_with_na_all(condition = ~.x == "NA")
+
+```
+
+Good link for missing data: http://juliejosse.com/wp-content/uploads/2018/06/DataAnalysisMissingR.html
+
+```{r}
+# Check if there are any variables missing more than 30% of the data
+library(naniar)
+library(VIM)
+
+# for plot of count of variables missing excluding ID columns
+gg_miss_var(red_filtered[,3:length(red_filtered)])
+```
+
+Visual summary of variables missing
+```{r}
+# The function VIM aggr calculates and represents the number of missing entries in each variable and for certain combinations of variables (which tend to be missing simultaneously).
+# for percentage missing excluding ID columns
+res<-summary(aggr(red_filtered[,3:length(red_filtered)], sortVar=TRUE))$combinations
+```
+
+Check variables missing within final red sample
+This is in case we need to report more detail on imputations for this final sample
+
+```{r}
+# select those in just the final sample
+finalsample <- red_filtered[red_filtered$red_id %in% red_ids,]
+res<-summary(aggr(finalsample[,3:length(finalsample)], sortVar=TRUE))$combinations
+
+```
+
+# for final sample only
+This was for CSV to send to Edwin (4 May)
+But consider just doing separate pairwise correlations
+- dropping NAs for those missing in the behavioral
+```{r}
+# create df for edwin
+finalsample_edwin <- subset(finalsample, select=-c(WASI_Mat, WASI_Voc, SDQ_emotional, SDQ_conduct, SDQ_peer, SDQ_hyperactivity, SDQ_prosocial))
+
+#fmri betas
+red_betas <- read.csv("~/ownCloud/PhD/RED/Betas/all_betas.csv")
+
+# bind fmri betas with 
+df <- cbind(finalsample_edwin, red_betas)
+
+# drop unnecessary columns (like IDs)
+# note that there are 2 red_ids, drop that after the first drop
+df <- subset(df, select = -c(sub_id, cbu_id, mri_tag))
+# drop the red_id.1 (2nd red_id column)
+df <- subset(df, select = -c(red_id.1))
+
+# write into csv if need be
+#write.csv(df, "~/ownCloud/PhD/RED/Behavioral Data/RED_finalsample.csv")
+
+```
+
+
+Sanity check for all NA means (missing data avg) per column
+```{r}
+# See the percentage of NAs per variable (excluding ID columns)
+colMeans(is.na(red_filtered[,3:length(red_filtered)]))
+```
+
+
+
+# IMPUTATIONS
+## From Roma's script: exploring missing data and kNN data imputation
+
+# To look at participants missing more than 30% data
+```{r}
+
+# https://cran.r-project.org/web/packages/finalfit/vignettes/missing.html
+library(dplyr)
+library(naniar)
+library(VIM)
+
+# transpose data and do the same with subjects
+all_red_transposed <- t(red_filtered)
+all_red_transposed <- data.frame(all_red_transposed)
+
+# The function VIM aggr calculates and represents the number of missing entries in each variable and for certain combinations of variables (which tend to be missing simultaneously).
+# Drop first two rows which are just IDs and some MRI IDs are missing
+res<-summary(aggr(all_red_transposed[3:nrow(all_red_transposed),], sortVar=TRUE))$combinations
+
+#dim(all_red_transposed)
+```
+
+From above we can see which participant is missing more than 30% of their data
+Drop them
+```{r}
+# From this we can see which participant has more than 30% data missing (index column)
+# Drop these people when we are looking at everything including WASI (cross reference the above dataframe)
+# This is the sample when we don't exclude based on missing SDQ earlier on
+missing <- all_red_transposed["red_id", c("X73", "X35", "X39", "X68", "X80", "X1", "X2", "X5", "X3")]
+
+# These should be the ones needed to drop when we exclude WASI & those missing SDQ scores
+drop <- all_red_transposed["red_id", c("X1", "X2", "X5", "X3")]
+
+# Now drop this participant from all_red_filtered for imputations
+all_red <- red_filtered[!red_filtered$red_id %in% drop, ]
+```
+
+
+## NOTE ##
+This is to just drop wasi
+Since we may not need to use wasi anyways
+
+KEEP THIS IN MIND as you go into the imputations section
+
+```{r}
+# move over red_filtered into test dataframe for this
+test <- red_filtered
+test <- test[-c(1,2),-c(7,8)]# drop wasi columns and first two participants to see
+
+# for plot of count of variables missing excluding ID columns
+gg_miss_var(test[,3:length(test)])
+```
+# Proportion of missing data per variable
+```{r}
+# for percentage missing excluding ID columns
+res<-summary(aggr(test[,3:length(test)], sortVar=TRUE))$combinations
+```
+
+# Proportion of data each participant is missing
+```{r}
+# transpose data and do the same with subjects
+test_transposed <- t(test)
+test_transposed <- data.frame(test_transposed)
+
+# The function VIM aggr calculates and represents the number of missing entries in each variable and for certain combinations of variables (which tend to be missing simultaneously).
+# Drop first two rows which are just IDs and some MRI IDs are missing
+res<-summary(aggr(test_transposed[4:nrow(test_transposed),], sortVar=TRUE))$combinations
+```
+
+
+
+```{r}
+# From this we can see which participant has more than 30% data missing (index column)
+
+test_drop <- test_transposed["red_id", c("X71", "X33", "X37", "X66", "X78")]
+
+# Now drop this participant from all_red_filtered for imputations
+test_all_red <- test[!test$red_id %in% test_drop, ]
+```
+
+
+
+## NOTE ##
+two sections below for KNN (one with data with WASI and one without WASI)
+So pick one and just go with that as they use same variables 
+Then be sure to check which csv name it is writing to (they are commented out)
+
+## KNN ##
+k-Nearest Neighbour Imputation based on a variation of the Gower Distance for numerical, categorical, ordered and semi-continuous variables. Gower distance uses Manhattan for calculating distance between continuous data points and Dice for calculating distance between categorical data points. Gower distance is computed as the average of partial dissimilarities across individuals. Each partial dissimilarity (and thus Gower distance) ranges in [0 1]. (Gower 1971).
+
+```{r}
+####################################################
+# data imputation starts here with 3 diff methods
+####################################################
+
+library(laeken)
+library(mice)
+library(VIM)
+
+# new dataframe for imputed values for comparison
+red_imp <- all_red
+
+### Need to change the numeric values into factor levels for imputation purposes
+# Weirdly all are character variables
+# Messy line of code but indexing here for everything to become numeric other than the first two ID columns
+red_imp[,3:19][sapply(red_imp[, 3:19], is.character)] <- lapply(red_imp[,3:19][sapply(red_imp[, 3:19], is.character)], as.numeric)
+
+# Change numeric variables into factors
+# Code below will go through and convert numeric variables into factors
+# Will only be applied to non-numeric data which we made sure of above
+red_imp[sapply(red_imp, is.numeric)] <- lapply(red_imp[sapply(red_imp, is.numeric)], as.factor)
+
+#############################################################
+# kNN imputation
+#############################################################
+red_knn <- kNN(red_imp[,3:ncol(red_imp)], k=5, numFun = weightedMean, catFun = maxCat, weightDist=TRUE) # http://statistikat.github.io/VIM/reference/kNN.html
+
+# to get rid of the second half of the columns which contain True/False on whether value was imputed
+kNNdata <- red_knn[,1:(ncol(red_knn)/2)]
+
+summary(kNNdata)
+
+```
+
+Write to csv just in case
+```{r}
+write.csv(red_knn, "~/ownCloud/PhD/RED/Behavioral Data/RED_knn_details.csv")
+```
+
+# WITHOUT WASI
+
+```{r}
+####################################################
+# data imputation starts here with 3 diff methods
+####################################################
+
+library(laeken)
+library(mice)
+library(VIM)
+
+# new dataframe for imputed values for comparison
+red_imp <- test_all_red
+
+### Need to change the numeric values into factor levels for imputation purposes
+# Weirdly all are character variables
+# Messy line of code but indexing here for everything to become numeric other than the first two ID columns
+red_imp[,3:ncol(red_imp)][sapply(red_imp[, 3:ncol(red_imp)], is.character)] <- lapply(red_imp[,3:ncol(red_imp)][sapply(red_imp[, 3:ncol(red_imp)], is.character)], as.numeric)
+
+# Change numeric variables into factors
+# Code below will go through and convert numeric variables into factors
+# Will only be applied to non-numeric data which we made sure of above
+red_imp[sapply(red_imp, is.numeric)] <- lapply(red_imp[sapply(red_imp, is.numeric)], as.factor)
+
+#############################################################
+# kNN imputation
+#############################################################
+red_knn <- kNN(red_imp[,3:ncol(red_imp)], k=5, numFun = weightedMean, catFun = maxCat, weightDist=TRUE) # http://statistikat.github.io/VIM/reference/kNN.html
+
+# to get rid of the second half of the columns which contain True/False on whether value was imputed
+kNNdata <- red_knn[,1:(ncol(red_knn)/2)]
+
+summary(kNNdata)
+
+```
+
+
+
+# Filter out participants who are not in final sample from imputed dataset
+
+```{r}
+# cbind red_id from filtered dataset with new imputed data
+all_red_imp <- cbind(red_imp$red_id, kNNdata)
+# rename red_id column name
+all_red_imp <- all_red_imp %>% dplyr::rename(red_id = `red_imp$red_id`)
+
+# merge with final fMRI IDs so we have sub ids, etc. of just the participants that we want
+# note we may not have all 40 participants due to SDQ drop outs plus 99003 is not in other data
+all_red_imp <- merge(final_fmri_ids, all_red_imp)
+
+# write to CSV
+#write.csv(all_red_imp,"~/ownCloud/PhD/RED/Behavioral Data/RED_imputed_raw.csv")
+
+# NO WASI
+write.csv(all_red_imp,"~/ownCloud/PhD/RED/Behavioral Data/REDnowasi_imputed_raw.csv")
+```
+
+# STANDARDIZE
+## read in either with wasi or no wasi csv to do this bit
+Read in raw csv to standardize
+- There's an issue with factor levels after imputation
+
+```{r}
+red_raw <- read.csv("~/ownCloud/PhD/RED/Behavioral Data/RED_imputed_raw.csv")
+
+# IF we we're working with no WASI
+red_raw <- read.csv("~/ownCloud/PhD/RED/Behavioral Data/REDnowasi_imputed_raw.csv")
+
+# drop first column
+red_raw <- red_raw[,2:ncol(red_raw)]
+
+# zscore data
+red_scaled <- as.data.frame(scale(red_raw[,5:ncol(red_raw)], center=TRUE))
+
+# just to check
+mean(red_scaled$Equivalised_Income)
+sd(red_scaled$Equivalised_Income)
+
+# cbind id numbers, etc.
+red_scaled <- cbind(all_red_imp[,1:4], red_scaled)
+
+# write into csv
+#write.csv(red_scaled, "~/ownCloud/PhD/RED/Behavioral Data/RED_imputed_scaled.csv")
+# NO WASI
+write.csv(red_scaled, "~/ownCloud/PhD/RED/Behavioral Data/REDnowasi_imputed_scaled.csv")
+```
+
+
+## ONLY looking at RCADS and SDQ plus age
+We will do the same thing just to calculate what data is missing from these sections
+Assuming we've run the above sections and have red_filtered set
+```{r}
+# Select the items that we want for our individual differences section and beta values
+sdqrcads_all <- red_filtered %>% select(red_id, 
+                                Sex = is_male,
+                                Age = age_years,        
+                                'RCADS MDD' = Q2_RCADS_MDD,
+                                'RCADS GAD' = Q2_RCADS_GAD,
+                                'SDQ internalising' = SDQ_internalising,
+                                'SDQ externalising' = SDQ_externalising,
+                                'SDQ total' = SDQ_total)
+
+```
+
+Now look at missing data proportions
+```{r}
+# Check if there are any variables missing more than 30% of the data
+library(naniar)
+library(VIM)
+
+# for plot of count of variables missing excluding ID columns
+gg_miss_var(sdqrcads_all[,3:length(sdqrcads_all)])
+```
+
+Visual summary of variables missing
+Note: this doesn't change really from anything above since the number of participants don't change
+```{r}
+# for percentage missing excluding ID columns
+res<-summary(aggr(sdqrcads_all[,3:length(sdqrcads_all)], sortVar=TRUE))$combinations
+```
+# To look at participants missing more than 30% data
+```{r}
+# transpose data and do the same with subjects
+sdqrcads_transposed <- t(sdqrcads_all)
+sdqrcads_transposed <- data.frame(sdqrcads_transposed)
+
+# Drop first two rows which are just IDs and some MRI IDs are missing
+res<-summary(aggr(sdqrcads_transposed[3:nrow(sdqrcads_transposed),], sortVar=TRUE))$combinations
+
+```
+
+
+
+
+
+-------------------------------------------
+
+OLD STUFF just leave it for now
+**take note of the different ID names
+```{r, include=FALSE}
+# ipad_filtered <- ipad[ipad$red_id %in% red_ids, ]
+# #note that there are a ton of NAs for the first bit of the ipad data so take that out
+# ipad_filtered <- subset(ipad_filtered, select=c(red_id,VOCAB_ItemStart:length(ipad_filtered)))
+# 
+# sdq_wasi_filtered <- sdq_wasi[sdq_wasi$red_id %in% red_ids,]
+# 
+# data_roma_filtered <- data_roma[data_roma$red_id %in% red_ids,]
+# 
+# data_edwin_filtered <- data_edwin[data_edwin$red_id %in% red_ids,]
+# 
+# data_alex_filtered <- data_alex[data_alex$red_id %in% red_ids,]
+# 
+# data_giacomo_filtered <- data_giacomo[data_giacomo$red_id  %in% red_ids,]
+# siblings <- data_giacomo[data_giacomo$PpsID_2_TEXT %in% red_ids,] #sibling within final sample - extract from ID_2 column
+```
+
+
+## Check SDQ & WASI from Roma and Alex's data and from the sdq_wasi data pulled in
+- There were inconsistencies with dataset copying over in Roma's
+
+## Steps
+1) From Alex and Roma's datasets, select only the ids, SDQ and WASI scores
+2) Merge the two datasets to get the participants
+3) Create variables that outputs column of True/False if they match
+
+```{r}
+# Select SDQ and WASI variables from each dataset
+match_alex <- data_alex %>% select(red_id, SDQ_emotional, SDQ_conduct, SDQ_hyperactivity,
+                                   SDQ_peer, SDQ_prosocial, WASI_Mat, WASI_Voc)
+
+
+match_roma <- data_roma %>% select(red_id, sdq_emo, sdq_cond, sdq_hypera, sdq_peer,
+                                   sdq_pros, wasi_mat, wasi_vocab)
+
+# merge
+match_data <- merge(match_alex, match_roma) 
+
+# check out sdq_wasi data
+test <- match_alex[match_alex$red_id %in% red_ids,]
+test_match <- merge(match_alex, sdq_wasi_data)
+```
+
+Now check the data
+```{r}
+# SDQ emotional peer problems
+match_data <- match_data %>% mutate(sdq_emo_match =
+                                      ifelse(match_data$SDQ_emotional==match_data$sdq_emo,TRUE,FALSE))
+
+# SDQ conduct
+match_data <- match_data %>% mutate(sdq_cond_match =
+                                      ifelse(match_data$SDQ_conduct==match_data$sdq_cond,TRUE,FALSE))
+
+# SDQ hyperactivity
+match_data <- match_data %>% mutate(sdq_hypera_match =
+                                      ifelse(match_data$SDQ_hyperactivity==match_data$sdq_hypera,TRUE,FALSE))
+
+# SDQ peer problems
+match_data <- match_data %>% mutate(sdq_peer_match =
+                                      ifelse(match_data$SDQ_peer==match_data$sdq_peer,TRUE,FALSE))
+
+# SDQ prosocial
+match_data <- match_data %>% mutate(sdq_pros_match =
+                                      ifelse(match_data$SDQ_prosocial==match_data$sdq_pros,TRUE,FALSE))
+
+
+# WASI maths
+match_data <- match_data %>% mutate(wasi_mat_match =
+                                      ifelse(match_data$WASI_Mat==match_data$wasi_mat,TRUE,FALSE))
+
+# WASI vocab
+match_data <- match_data %>% mutate(wasi_vocab_match =
+                                      ifelse(match_data$WASI_Voc==match_data$wasi_vocab,TRUE,FALSE))
+
+# write into csv for Roma
+write.csv(match_data, "~/ownCloud/PhD/RED/Other Datasets/roma_alex_sdqwasimatch.csv")
+```
+
+# check the test data
+all seems good here
+```{r}
+# SDQ emotional peer problems
+test_match <- test_match %>% mutate(sdq_emo_match =
+                                      ifelse(test_match$SDQ_emotional==test_match$sdq_emo,TRUE,FALSE))
+
+# SDQ conduct
+test_match <- test_match %>% mutate(sdq_cond_match =
+                                      ifelse(test_match$SDQ_conduct==test_match$sdq_cond,TRUE,FALSE))
+
+# SDQ hyperactivity
+test_match <- test_match %>% mutate(sdq_hypera_match =
+                                      ifelse(test_match$SDQ_hyperactivity==test_match$sdq_hypea,TRUE,FALSE))
+
+# SDQ peer problems
+test_match <- test_match %>% mutate(sdq_peer_match =
+                                      ifelse(test_match$SDQ_peer==test_match$sdq_peer,TRUE,FALSE))
+
+# SDQ prosocial
+test_match <- test_match %>% mutate(sdq_pros_match =
+                                      ifelse(test_match$SDQ_prosocial==test_match$sdq_pros,TRUE,FALSE))
+
+
+# WASI maths
+test_match <- test_match %>% mutate(wasi_mat_match =
+                                      ifelse(test_match$WASI_Mat==test_match$wasi_mat,TRUE,FALSE))
+
+# WASI vocab
+test_match <- test_match %>% mutate(wasi_vocab_match =
+                                      ifelse(test_match$WASI_Voc==test_match$wasi_vocab,TRUE,FALSE))
+
+```
